@@ -1,0 +1,8 @@
+type = module
+name = Contextual Links
+description = Provides contextual links to perform actions related to elements on a page.
+package = User Interface
+tags[] = Administration
+tags[] = Site Navigation
+version = BACKDROP_VERSION
+backdrop = 1.x
