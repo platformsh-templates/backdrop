@@ -1,0 +1,10 @@
+type = module
+name = Date
+description = Makes date/time fields available.
+package = Fields
+tags[] = Dates
+tags[] = Content
+version = BACKDROP_VERSION
+backdrop = 1.x
+
+stylesheets[all][] = css/date.css

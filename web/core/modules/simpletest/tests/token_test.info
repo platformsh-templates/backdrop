@@ -1,0 +1,7 @@
+name = Token Test
+description = Testing module for token functionality.
+package = Testing
+backdrop = 1.x
+version = BACKDROP_VERSION
+hidden = TRUE
+type = module
