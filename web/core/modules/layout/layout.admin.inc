@@ -210,6 +210,7 @@ function layout_add_page() {
  */
 function layout_settings_form($form, &$form_state, Layout $layout) {
   form_load_include($form_state, 'inc', 'layout', 'layout.admin');
+  form_load_include($form_state, 'inc', 'layout', 'layout.context.admin');
 
   $form_state['layout'] = &$layout;
   $form['#tree'] = TRUE;
@@ -303,16 +304,36 @@ function layout_settings_form($form, &$form_state, Layout $layout) {
 
   $contexts = $layout->getContexts();
   $built_in_contexts = isset($contexts['overrides_path']) ? 2 : 1;
+  $form['context_wrapper'] = array(
+    '#title' => t('Contexts'),
+    '#type' => 'item',
+    '#id' => 'context-wrapper',
+    '#description' => t('(Optional) Contexts define what blocks are available within this layout. Most wildcards in the path will be associated with a context automatically.'),
+    // Current user context is always present.
+  );
   $form['context_wrapper']['#access'] = !$layout->isDefault();
   $form['context_wrapper']['#prefix'] = '<div id="layout-contexts">';
   $form['context_wrapper']['#suffix'] = '</div>';
   $form['context_wrapper']['context'] = array(
     '#title' => t('Contexts'),
-    '#type' => 'item',
-    '#description' => t('Contexts define what blocks are available within this layout. Most wildcards in the path will be associated with a context automatically.'),
+    '#type' => 'container',
     '#parents' => array('context'),
-    // Current user context is always present.
-    '#access' => count($contexts) > $built_in_contexts,
+  );
+
+  $form['context_wrapper']['context']['add'] = array(
+    '#type' => 'submit',
+    '#value' => t('Add context'),
+    '#attributes' => array('class' => array('layout-link-button', 'layout-access-add')),
+    '#validate' => array(),
+    '#submit' => array(
+      'layout_settings_form_update_layout',
+      'layout_settings_form_context_add',
+    ),
+    '#ajax' => array(
+      'callback' => 'layout_ajax_form_open_dialog',
+    ),
+    '#prefix' => '<ul class="action-links"><li>',
+    '#suffix' => '</li></ul>',
   );
 
   $all_context_info = _layout_get_all_info('layout_context');
@@ -326,28 +347,74 @@ function layout_settings_form($form, &$form_state, Layout $layout) {
   $form['context_wrapper']['context']['required'] = array(
     '#theme' => 'layout_settings_context_table',
     '#layout_path' => $layout->getPath(),
+    '#access' => count($contexts) > $built_in_contexts,
   );
 
   foreach ($contexts as $context_key => $layout_context) {
-    if ($layout_context->position && $layout_context->locked) {
-      $form['context_wrapper']['context']['required'][$context_key]['plugin'] = array(
-        '#type' => 'value',
-        '#value' => $layout_context->plugin,
-      );
-      $form['context_wrapper']['context']['required'][$context_key]['label'] = array(
-        '#markup' => check_plain($all_context_info[$layout_context->plugin]['title']),
-      );
-    }
-    elseif ($layout_context->position && $layout_context->required) {
-      $form['context_wrapper']['context']['required'][$context_key]['plugin'] = array(
-        '#type' => 'select',
-        '#options' => $context_options,
-        '#default_value' => $layout_context->plugin,
-      );
-    }
-    else {
-      // @todo: Support adding and removing custom contexts not based on path.
-      // e.g. Adding a Node context based on a hard-coded ID.
+    if (!in_array($context_key, array('current_user', 'overrides_path', 'dashboard'))) {
+      // Contexts that are locked to a particular position (such as node/%).
+      if ($layout_context->position && $layout_context->required) {
+        $form['context_wrapper']['context']['required'][$context_key]['summary'] = array(
+          '#markup' => $layout_context->getAdminSummary($layout->getPath()),
+        );
+        if ($layout_context->locked) {
+          $form['context_wrapper']['context']['required'][$context_key]['plugin'] = array(
+            '#markup' => check_plain($all_context_info[$layout_context->plugin]['title']),
+          );
+        }
+        else{
+          $form['context_wrapper']['context']['required'][$context_key]['plugin'] = array(
+            '#type' => 'select',
+            '#options' => $context_options,
+            '#default_value' => $layout_context->plugin,
+          );
+        }
+      }
+      // Custom contexts and required contexts that do not need position (such
+      // as admin/dashboard).
+      else {
+        $form['context_wrapper']['context']['required'][$context_key]['summary'] = array(
+          '#markup' => $layout_context->getAdminSummary($layout->getPath()),
+        );
+        $form['context_wrapper']['context']['required'][$context_key]['plugin'] = array(
+          '#markup' => check_plain($all_context_info[$layout_context->plugin]['title']),
+        );
+      }
+      if (!$layout_context->required) {
+        $form['context_wrapper']['context']['required'][$context_key]['operations'] = array(
+          '#type' => 'container',
+          '#attributes' => array('class' => array('layout-operations')),
+        );
+        $form['context_wrapper']['context']['required'][$context_key]['operations']['remove'] = array(
+          '#type' => 'submit',
+          '#value' => t('Remove'),
+          '#attributes' => array('class' => array('layout-link-button', 'layout-context-remove')),
+          '#validate' => array(),
+          '#submit' => array(
+            'layout_settings_form_context_remove',
+            'layout_settings_form_update_layout',
+          ),
+          '#ajax' => array(
+            'callback' => 'layout_ajax_form_update',
+          ),
+          '#name' => 'conditions_' . $context_key . '_remove',
+        );
+        $form['context_wrapper']['context']['required'][$context_key]['operations']['configure'] = array(
+          '#type' => 'submit',
+          '#value' => t('Configure'),
+          '#attributes' => array('class' => array('layout-link-button', 'layout-context-configure')),
+          '#validate' => array(
+            'layout_settings_form_validate',
+          ),
+          '#submit' => array(
+            'layout_settings_form_context_edit',
+          ),
+          '#ajax' => array(
+            'callback' => 'layout_ajax_form_open_dialog',
+          ),
+          '#name' => 'conditions_' . $context_key . '_configure',
+        );
+      }
     }
   }
 
@@ -589,9 +656,18 @@ function layout_settings_form_update_layout($form, &$form_state) {
     $layout->name = $form_state['values']['name'];
   }
   if (isset($form_state['values']['layout_template'])) {
-    $new = $form_state['values']['layout_template'];
-    $region_mapping = layout_get_legacy_region_mapping($layout->layout_template, $new);
-    $layout->setLayoutTemplate($form_state['values']['layout_template'], $region_mapping);
+    $old_template = $layout->layout_template;
+    $new_template = $form_state['values']['layout_template'];
+    if ($old_template != $new_template) {
+      $region_mapping = layout_get_legacy_region_mapping($old_template, $new_template);
+      // If there is no theme cache entry for this template, rebuild theme cache
+      // to ensure that the new template is loaded.
+      $theme_entries = theme_get_registry(FALSE);
+      if (empty($theme_entries['layout__' . $new_template])) {
+        backdrop_theme_rebuild();
+      }
+      $layout->setLayoutTemplate($new_template, $region_mapping);
+    }
     if (!empty($layout->orphaned_blocks)) {
       $orphaned_blocks_titles = array();
       $layout_template_info = layout_get_layout_template_info($form_state['values']['layout_template']);
@@ -615,7 +691,7 @@ function layout_settings_form_update_layout($form, &$form_state) {
     $arguments = array();
 
     foreach ($layout->getContexts() as $position => $layout_context) {
-      if (isset($form_state['values']['context']['required'][$position])) {
+      if (isset($form_state['values']['context']['required'][$position]['plugin'])) {
         $argument_config = $form_state['values']['context']['required'][$position];
         $plugin = $argument_config['plugin'];
       }
@@ -811,6 +887,24 @@ function layout_content_form($form, &$form_state, Layout $layout, $renderer_name
     '#prefix' => '<div id="layout-messages">',
     '#suffix' => '</div>',
   );
+
+  // Add a link to preview the page.
+  $link_path = $layout->getPath();
+  // A null path returns the site root. See https://github.com/backdrop/backdrop-issues/issues/4383
+  if (!is_null($link_path) && backdrop_valid_path($link_path)) {
+    $form['top']['#theme_wrappers'] = array('container');
+    $form['top']['#attributes']['class'] = array('edit-layout-top', 'clearfix');
+
+    $form['top']['button'] = array(
+      '#type' => 'dropbutton',
+    );
+    $form['top']['button']['#links'] = array(
+      array(
+        'title' => t('View page'),
+        'href' => $link_path,
+      )
+    );
+  }
 
   $form['content'] = array('#tree' => TRUE);
   $form['content']['block'] = array('#tree' => TRUE);
@@ -1205,6 +1299,7 @@ function layout_block_configure_form($form, &$form_state, Layout $layout, Block 
     $form['region']['#default_value'] = $layout->in_progress['region_name'];
   }
 
+  $form['actions']['#weight'] = 999;
   $form['actions']['#type'] = 'actions';
   $form['actions']['submit'] = array(
     '#type' => 'submit',
@@ -1553,7 +1648,6 @@ function layout_block_remove_page(Layout $layout, Block $block, $renderer_name) 
     backdrop_goto('admin/structure/layouts/manage/' . $layout->name);
   }
 }
-
 
 /**
  * Form callback; Displays form for adding new conditions to a layout or block.
@@ -2066,10 +2160,10 @@ function layout_locked_message($item, $type = 'layout') {
 
   // The path varies based on the item type.
   $path_type = 'manage';
-  $button_title = 'Save layout';
+  $button_title = t('Save layout');
   if ($type === 'menu_item') {
     $path_type = 'menu';
-    $button_title = 'Save menu settings';
+    $button_title = t('Save menu settings');
   }
 
   $message = '';
@@ -2814,14 +2908,16 @@ function _layout_settings_get_group_operations($template_info, $is_default) {
   $links = array();
 
   if (!empty($template_info['flexible'])) {
-    $links['configure'] = array(
-      'title' => t('Configure regions'),
-      'href' => 'admin/structure/layouts/settings/flexible-template/' . $template_info['name'] . '/configure',
-    );
-    $links['edit'] = array(
-      'title' => t('Configure name'),
-      'href' => 'admin/structure/layouts/settings/flexible-template/' . $template_info['name'] . '/edit',
-    );
+    if (user_access('administer flexible templates')) {
+      $links['configure'] = array(
+        'title' => t('Configure regions'),
+        'href' => 'admin/structure/layouts/settings/flexible-template/' . $template_info['name'] . '/configure',
+      );
+      $links['edit'] = array(
+        'title' => t('Configure name'),
+        'href' => 'admin/structure/layouts/settings/flexible-template/' . $template_info['name'] . '/edit',
+      );
+    }
     if (user_access('synchronize configuration')) {
       $links['export'] = array(
         'title' => t('Export'),
@@ -2832,10 +2928,12 @@ function _layout_settings_get_group_operations($template_info, $is_default) {
         ),
       );
     }
-    $links['delete'] = array(
-      'title' => t('Delete'),
-      'href' => 'admin/structure/layouts/settings/flexible-template/' . $template_info['name'] . '/delete',
-    );
+    if (user_access('administer flexible templates')) {
+      $links['delete'] = array(
+        'title' => t('Delete'),
+        'href' => 'admin/structure/layouts/settings/flexible-template/' . $template_info['name'] . '/delete',
+      );
+    }
   }
   if ($is_default) {
     $links['disable'] = array(
