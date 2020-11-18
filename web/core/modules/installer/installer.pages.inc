@@ -319,7 +319,7 @@ function installer_browser_installation_select_versions_form($form, &$form_state
     backdrop_goto('admin/installer/install/enable');
   }
 
-  backdrop_set_message(t('It is recommended that you back up your database and site before you continue. !link.', array('!link' => l(t('Learn how'), 'http://drupal.org/node/22281'))), 'warning');
+  backdrop_set_message(t('It is recommended that you back up your database and site before you continue. !link.', array('!link' => l(t('Learn how'), 'https://backdropcms.org/backups'))), 'warning');
 
   $form['maintenance_mode'] = array(
     '#type' => 'checkbox',
@@ -644,6 +644,22 @@ function installer_browser_installation_theme_set($form, &$form_state) {
  */
 function installer_browser_installation_enable_form($form, &$form_state, $projects) {
   $modules = system_rebuild_module_data();
+
+  // Go through each of the installed projects and add any contained submodules
+  // that are not hidden to the list of projects.
+  foreach ($projects as $project) {
+    if ($project['type'] == 'module' && isset($modules[$project['name']])) {
+      foreach ($modules as $module) {
+        if (isset($module->info['project']) && isset($modules[$project['name']]->info['project']) && $modules[$project['name']]->info['project'] == $module->info['project'] && $modules[$project['name']]->name != $module->name && !$module->info['hidden']) {
+          $projects[$module->name] = array(
+            'type' => $module->info['type'],
+            'title' => $module->info['name'],
+            'name' => $module->name,
+          );
+        }
+      }
+    }
+  }
 
   $options = array();
   $missing = array();

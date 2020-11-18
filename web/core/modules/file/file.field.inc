@@ -83,7 +83,7 @@ function file_field_instance_settings_form($field, $instance) {
     '#type' => 'textfield',
     '#title' => t('File directory'),
     '#default_value' => $settings['file_directory'],
-    '#field_prefix' => $field['settings']['uri_scheme'] == 'public' ? settings_get('file_public_path', config_get('system.core', 'file_public_path')) . '/' : '',
+    '#field_prefix' => $field['settings']['uri_scheme'] == 'public' ? config_get('system.core', 'file_public_path') . '/' : '',
     '#description' => t('Optional subdirectory within the upload destination where files will be stored. Do not include preceding or trailing slashes.'),
     '#element_validate' => array('_file_generic_settings_file_directory_validate'),
     '#weight' => 3,
@@ -853,7 +853,7 @@ function file_field_widget_process($element, &$form_state, $form) {
     $field_element = backdrop_array_get_nested_value($form, $parents);
     $new_wrapper = $field_element['#id'] . '-ajax-wrapper';
     foreach (element_children($element) as $key) {
-      if (isset($element[$key]['#ajax'])) {
+      if (isset($element[$key]['#ajax']['path'])) {
         $element[$key]['#ajax']['path'] = $new_path;
         $element[$key]['#ajax']['wrapper'] = $new_wrapper;
       }
